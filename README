@@ -6,4 +6,6 @@ The look-and-feel is rather similar to the IRAF tasks it replaces, with cursor-d
 
 The code works either with dispersion parallal to rows or to columns.  It has not been tested on severely tilted spectra.
 
+Most of the 'magic numbers' in the code are from the file 'apertures.config' (default name).  You'll almost undoubtedly need to adjust these.
+
 The output is a database 'ap' file crafted to be in exactly the same format used by IRAF.
