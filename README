@@ -1,0 +1,9 @@
+A program to replace some of the functionality of IRAF's apfind, apedit, and aptrace with pure-python code.
+
+The program creates a description of the region on a 2-d CCD image of a spectrum that will later be used to extract 1-d spectra.   Not all the functionality of apfind (etc) is implemented, and the use cases are more limited, but should cover many common tasks.
+
+The look-and-feel is rather similar to the IRAF tasks it replaces, with cursor-driven commands to define apertures, edit trace points and so on.  The exact commands are not the same.
+
+The code works either with dispersion parallal to rows or to columns.  It has not been tested on severely tilted spectra.
+
+The output is a database 'ap' file crafted to be in exactly the same format used by IRAF.
