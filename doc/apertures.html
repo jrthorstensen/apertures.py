@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html><head>
+<style>
+body {
+    margin : 20px 60px 20px 80px;
+}
+title {
+    font-family: Arial, Helvetica, sans-serif;
+}
+p {
+    font-family: Arial, Helvetica, sans-serif;
+    padding : 0px 20px 5px;
+    line-height : 1.3 ;
+}
+ul {
+    font-family: Arial, Helvetica, sans-serif;
+    padding: 0px 10px 5px;   
+    margin-left : 80px ;
+}
+li {
+    font-family: Arial, Helvetica, sans-serif;
+    padding: 5px 5px 10px;
+}
+img {
+    padding: 20px 20px 20px 20px;
+}
+center {
+    font-family: Arial, Helvetica, sans-serif;
+}
+pre { 
+    font-family: Lucida, sans-serif;
+    font-size: 90% ;
+}
+    
+</style>
+
+
+<meta http-equiv="content-type" content="text/html; charset=UTF-8"><title>Finding and tracing software apertures for spectral extraction.</title></head>
+
+<body bgcolor="#ffffff">
+
+<center>
+<font size="+3"> apertures.py : a program for finding and tracing software apertures for spectral extraction.
+</font>
+<p>
+<font size="+1">
+John Thorstensen, Dartmouth College<br>
+</font></p><p>
+<font size="+1">2021 August
+</font></p><p></p><font size="+1">
+<p></p></font></center><font size="+1">
+
+<p>
+<b> The task: </b>
+Astronomical spectrographs often work in <i>long slit</i> mode.
+The telescope is aimed so that the light of some object of interest
+lands on the slit; the light is dispersed and re-imaged onto a 
+two-dimensional detector, usually a CCD.  The detector is
+positioned so that different wavelengths are mapped onto different
+columns or rows (the dispersion direction), 
+while the perpendicular direction corresponds
+to position on the sky along the slit (the spatial,
+or cross-dispersion direction). 
+</p>
+<center>
+<img style="width: 1000px; height: 350px;" alt="image" src="typicalspec.png">
+</center>
+<p>
+The figure shows an example of this kind of data, from the OSMOS instrument 
+at MDM Observatory on Kitt Peak.  The image shown has already
+been processed through bias subtraction and flatfielding. 
+<p>
+In this image the dispersion
+runs horizontally, with red wavelengths to the left and blue to
+the right, while the vertical dimension corresponds 
+to spatial location along the
+slit.  Note that night-sky emission lines such as the bright one
+indicated (which is [OI] at 5577 Angstroms) occur everywhere
+along the slit, but (of course!) only at one wavelength, and 
+therefore appear as vertical
+lines.  This spectrum was taken with the moon up, so one can 
+also see faint dark vertical features which are, mostly, solar 
+photospheric lines in the scattered moonlight.  
+<p>
+The horizontal streaks
+are spectra from stars at different locations on the slit.
+In this case, the brightest streak is the
+intended target; it is a cataclysmic
+binary which shows H-alpha emission; that's the 
+bright blob toward the left (redder) end.
+The other streaks are from accidental interlopers unlikely to be of 
+any interest.
+</p><p>
+Although the 2-d image looks pretty, in order to analyze
+it further, we'll need to isolate the spectrum
+of the target star from the background, and extract a 1-d
+array giving the total light in the 'streak' as a function
+of wavelength.  This is a multistep
+process.  The first step will be to determine: 
+</p><ol>
+<li> what strip across the image includes the light from the star of
+interest, that is, called the software <i>aperture</i> for the extraction; and
+</li><li> what regions on either side of that strip we should use to 
+estimate the sky backround spectrum, so it may be subtracted.
+</li></ol>
+<p>
+Once we have the aperture and the background region, we will be
+able to continue with the extraction. <b>All this program 
+does is find the parameters of these regions, using
+a semi-automated, interactive process.</b>
+</p>
+<p>
+In many cases it should be possible to find the aperture and background
+regions without human interaction, but if the signal-to-noise is not
+good, or the star is in a crowded region with many other stars in the 
+slit, there's a good possibility of missing the star, losing track
+of the aperture, or using a background region with strong sources in
+it.  It's desirable to enlist human judgment to be sure the apertures
+are set up correctly.  That's what this program works; basically, it
+<ol>
+<li> runs an automated process,
+<li> shows the user the results, and 
+<li> allows the user to adjust as appropriate.
+</ol>
+</p><p>
+To set up apertures, IRAF uses commands called <i>apedit</i> and 
+<i>aptrace</i>.  The present program is similar to those, and in 
+particular it writes out the aperture parameters in the same place,
+and with the same format, as the IRAF tasks.  Some motivations 
+for the new code:
+</p><ol>
+<li> IRAF is no longer supported, and while reports of its death are
+exaggerated, it is good to be prepared for the day when it just 
+doesn't work.
+</li><li> Lengthy (20+ years) experience using <i>apedit</i> and 
+<i>aptrace</i> suggested some improvements in usability.
+</li></ol>
+<p>
+This program is <i>interactive</i> and <i>cursor-driven</i>, just like
+the corresponding IRAF tasks.  For those unfamiliar, the basic idea
+is that a graph appears and a cursor appears; you then "drive" the
+program by typing <i>single-character commands</i> to the cursor.
+Unlike the IRAF versions, which were written when computers
+were much less capable, the present program immediately recomputes and
+updates the graph after each keystroke.  The execution time
+is pretty much imperceptible.
+</p>
+<p>
+<b> Limitations of this implementation. </b> This program does
+not implement all the capabilities of of <i>apedit</i> and 
+<i>aptrace</i>.  Some known limits:
+<ol>
+<li> It sets up apertures for <b>one object</b> per image.  <i>apfind</i>
+etc. can set up for many objects.  
+<li> The program assumes that the one object is in a <b>fairly consistent
+position on the slit.</b>  This can be relaxed by choosing the configuration
+parameters, but consistent position makes the processing more efficient.
+<li> The only curve-fitting function available is a polynomial (internally,
+a legendre polynomial fit.)
+<li> The tracing implicitly assumes that the target has an appreciable
+continuum; if all the flux is in isolated emission lines, it won't work well.
+<li> It's assumed the images to be processed are in FITS format <i>and</i> that the file names end with '.fits'.
+</ol>
+<p>
+Allowing more than one object would require a fair amount of revision. 
+People sometimes rotate the slit on the sky to capture a target star
+and a nearby field star at the same time (the 'amiga' technique). I
+haven't done this in a couple of decades, though, so I wasn't motivated
+to implement this capability.  If needed, changing the '.fits' filename 
+convention would be pretty straightforward.
+</p>
+<center>
+<font size="+1">
+<b>Setting up and running.</b>
+</font>
+</center>
+<p>
+The program is in <b>Python 3</b>.  It uses several standard
+packages, namely
+</p><ul>
+<li> astropy  (in particular astropy.io.fits)
+</li><li> numpy
+</li><li> matplotlib (used very heavily).
+</li></ul>
+<p>
+The other dependencies should all be standard (os, sys, datetime, and so on).
+</p>
+<p>
+You can get the program from github; look for "jrthorstensen github" with your
+favorite search engine, and look for the <i>apertures.py</i> repository.  
+A green button labeled "Code" appears; click on the menu that it presents,
+and download the .zip file.  Put the .zip file somewhere logical on your 
+machine, and unzip it.  A directory appears with <i>apertures.py</i>,
+<i>apertures.config</i>, and <i>test.fits</i>.  If you just want to
+try it out you should be able to 
+</p><pre>cd apertures.py-main            (descend into the directory)
+chmod +x apertures.py           (make apertures.py executable)
+</pre>
+<p>
+To take it for a test drive, 
+</p>
+<pre>./apertures.py test.fits
+</pre>
+<p>
+</p><p>
+If instead you want to try it on <b>your own data</b>, then
+<ul>
+<li> Copy <i> apertures.py</i>, either
+   <ol> 
+       <li> to the directory where your data are sitting, or 
+       <li> to somewhere on your path, which makes it visible from other directories.
+   </ol>
+</li>
+<li> copy <i>apertures.config</i> to the directory where you 
+have your data.  
+<li>> Edit <i>apertures.config</i> to make it appropriate to your data.
+</ul>
+<p>
+
+If your data have dispersion along rows (like the OSMOS image
+shown above), you can now run the program on an image file 
+(say 'foo.fits') by typing
+<pre>
+apertures.py foo.fits       
+</pre>
+<p> or
+<pre>./apertures.py foo.fits
+</pre>
+<p>
+depending on where you put <i>apertures.py</i>.  
+<i>Note</i> that
+if your images have <b>dispersion along columns</b>, 
+you need to include the '-c' option.  This flips the data internally
+before processing, and adjusts the output format appropriately.
+Example: 
+</p><pre>./apertures.py -c foo.fits
+</pre>
+<p>
+In production, you'll usually want to process <b>batches
+of spectra.</b>  To
+do so, 
+</p><ul>
+<li> Create a file listing the images you want, one per line.  The images
+<i>themeselves</i> must be named with the '.fits' extension, but the 
+names in the list can either have the '.fits' or not.
+</li><li> In the command to run the program, prepend the list name with 
+an @ sign, as in
+</li></ul> <pre>./apertures.py @mylist </pre>
+<p></p>
+<p></p>
+<center>
+<font size="+1">
+<b>The .config file.</b>
+</font>
+</center>
+<p>
+The program's actions depend on some <i>parameters</i> that you have
+to adjust for any new data set.  These are held in a file called by
+default <i>apertures.config</i>.  Here's a sample:
+</p><pre>DISPLINE | 429  | int # spectral pixel for aperture-finding
+WIDTH    | 60.  | float  # default width in pixels
+B1       | -200. | float # background limits rel to ctr. 
+B2       | -40.  | float 
+B3       | 40.   | float 
+B4       | 200.  | float 
+BFITORD  |  2    | int   # default polyomial order for bckgrd fit
+BITER    |  4    | int   # number of background rejection iterations
+BSIG     | 1.8   | float # sigma to cut in bckg iterations.
+NAVG     | 60  | int # number of dispersion lines to average
+AVGTYPE  | clippedavg | str # either 'clippedavg' or 'median'
+# AVGTYPE  | median | str # either 'clippedavg' or 'median'
+NLOWCUT  |  2  | int # number of low pixels to reject in clippedavg
+NHIGHCUT |  2  | int # number of high pixels to reject in clippedavg
+# With OSMOS and osctrtask, the star always lands very close 
+# to the same row.  Take advantage of this!
+PROFCTR  | 603. | float # default center for target star 
+PROFWIN  | 10.  | float # number of pixels to search for star
+YLEVEL   | 0.2  | float #fraction of profile height for 1st cut apert. limit
+R_GROW   | 1.5  | float # grow aperture limits by this factor from YLEVEL.
+FIGWID   | 10.  | float # width of figures, inches
+FIGHGHT  | 6.   | float # height of figures, inches
+TRACEORD |  3   | int # order of polynomial fit to trace
+TRACEITER |  3  | int # number of times to iterate trace fit
+TRACECLIP | 2. | float # sigma at which to clip trace points in each iter
+</pre>
+<p>
+The most critical parameters are:
+</p><ul>
+<li>  PROFCTR - This is the coordinate along the slit where the star lands.  
+It is assumed to be <i>fairly</i> consistent from exposure to exposure.  
+</li><li>  WIDTH - the width (perpendicular to the dispersion) of the strip that
+will be extracted to search for and define the aperture.  This should be
+set so that <i> all </i> the light from <i>any</i> star of interest in 
+your data set falls within the bounds PROFCTR + WIDTH/2. and PROFCTR - WIDTH/2.
+</li><li>  DISPLINE - The pixel along the dispersion where you want to take
+the cross-section to determine the aperture limits.  You should consitently
+have a good amount of signal here.
+</li><li> B1, B2, B3, B4 -- (B1,B2) defines the default background region to the 
+left of the star (lower pixel values), and (B3,B4) to the right. These
+are relative to the star's center, so B1 and B2 are less than zero.
+</li><li> PROFWIN -- this is the width of the window around PROFCTR that is 
+searched for the star (as distinct from the size of the whole subarray).
+</li></ul>
+<p>
+Obviously, these need to lie within the bounds of your detector.
+</p><p>
+I don't think IRAF's <i>apedit</i> (and <i>apfind</i>) have equivalents
+of the PROFCTR and WIDTH parameters.  Rather, they look for the maximum
+flux along the slit and <i>just assume</i> that's the star you want, even
+though it frequently isn't.  This leads to a lot of unnecessary mousing and
+typing to delete the wrong aperture, mark the right one, and so on.  The 
+approach taken here makes it far more likely you'll get the right star, 
+but depends on fairly consistent centering of the star along the slit.
+If the star is not consistently centered, you can reproduce the IRAF
+functionality by increasing the WIDTH and PROFWIN parameters.  Note 
+that if your star is outside the WIDTH, the program does not even 
+strip out the relevant data, so you can't fix the problem with the 
+cursor commands (in this version). <b><font color="#ff0000">However,
+be aware this strategy has not been tested on real data and might cause 
+troubles in the tracing the aperture;</b></font> it should
+work, but hasn't been tested.
+</p><p>
+The other parameters are less critical; the values in the 
+default file may be good for your data, or you may wish to fiddle
+with them.  Most will be discussed in context below; they're
+names are in UPPERCASE.
+</p><p>
+You data may include<b>more than one instrument configuration</b> 
+(for example, you might have used more than one grating).  It's possible
+that one configuration file will do well enough for all your
+settings, but if not, you'll need a different configuration 
+file for each setup.  
+For example, if some of your data were taken with 'grating 6', 
+make a config file for that setup, and then
+specify it using the <b>-p</b> command line option:
+<pre>
+./apertures.py -p grating6.config @grating6list
+</pre>
+</p>
+<center>
+<font size="+1">
+<b>Finding the aperture.</b>
+</font>
+</center>
+<p>
+The program opens the fits file, and creates an average of 
+NAVG dispersion lines centered on DISPLINE.  The result is a 
+1-d array, with a length equal to the number of pixels along
+the slit.
+</p><p>
+The average is computed one of two ways, depending on 
+the configuration parameter AVGTYPE, which can
+be either :
+<ul> 
+<li> <b>median</b> -- the median value of the dispersion lines, or
+<li> <b>clippedavg</b> -- the mean of the dispersion lines, after 
+the NLOWCUT lowest pixels and the NHIGHCUT highest pixels are
+rejected.  
+</ul>
+<p>
+Both methods are designed to reject outlying points, such as 'cosmic ray'
+hits and dropouts in the data.  My experience is that <b>clippedavg</b>
+is a little better.  The profile tends to vary slowly with dispersion,
+so you can generally make NAVG fairly large.  This gives better 
+signal-to-noise for faint objects. 
+</p>
+<p>
+A graph of the averaged profile should be displayed.  
+This example is is from the same spectrum shown above:
+</p>
+<center>
+<img style="width: 1000px; height: 600px;" alt="image" src="profile.png">
+</center>
+<p>
+Here, DISPLINE was chosen to cut through the H-alpha
+emission line, where the target star is brightest.  The big bump
+is the target star; the smaller bump to the left is the fainter
+star nearby.  
+</p>
+<p>
+Note that with the automatic scaling shown, the horizontal axis 
+does not cover the whole detector; the extent is chosen to show
+the whole region in which the background is computed, plus a little
+on either side.  Also, the vertical axis has been scaled so
+that the target star's profile is (hopefully) framed nicely.
+(A subtle point: the pixel scale shown on the horizontal axis is 
+<i>one-indexed</i>, like pixels in IRAF, not zero-indexed
+like array indices in python.)
+</p>
+<p>
+You can see from the plot that a fair amount of analysis
+has already been done on the slit profile array.
+This happens automatically:
+<ol>
+<li>  A subarray is selected from the slit average,
+centered on PROFCTR and with width WIDTH.
+The <b>black dotted lines</b> show the extent of this subarray
+(note that the data plotted is a section of the whole line,
+not just the subarray).  <i>If your star's profile spills
+significantly outside the black dotted lines, you need to
+adjust the WIDTH parameter and start over</i>.  Unless
+you have only a couple of spectra I wouldn't recommend 
+resetting PROFCTR to 'chase' individual centers.
+<li> An initial center was established by searching for the
+maximum in a still smaller window, of size PROFCTR.
+<li> The pixels in the background regions have been fit with 
+a polynomial of order BFITORD.  The fit is iterated BITER
+times, and at each iteration, pixels more than BSIG standard
+deviations away from the best fit are discarded.  
+The iterated background fit is shown on the graph, as well
+as the points that <i>survived</i> the iteration, which are
+overplotted with red dots.  You can see in the example that
+a faint background star was rejected successfully (no 
+red dots in its profile).
+<li> The aperture limits are computed by starting
+at the peak and 'walking' down the profile until a pixel
+is found that has a value less than YLEVEL times the 
+background-subtacted peak value.  YLEVEL clearly must
+be between 0 and 1; - I've used 0.2 or 0.3 typically.
+Once that pixel at that level is found, the limit is 
+'grown' by a multiplicative factor R_GROW, 
+which is typically 1.5.  The procedure is then repeated on the 
+other side of the profile.  The IRAF task <i>apresize</i> 
+uses a very similar algorithm.
+<b>The aperture limits are shown as dashed green vertical
+lines.  This is the region that will used to compute the
+star's 1-d spectrum.</b>
+<li> Finally, a first-moment centroid is found from the
+(background-subtracted)
+pixels included within the aperture.  <b>The first-moment
+aperture center is shown by the solid blue vertical
+line.</b>
+</ol>
+<p>
+A nice bright-red <b>cursor crosshair</b> appears, similar 
+to the cursor in IRAF.  If you'd rather use the default
+<i>matplotlib</i> pointer, you can specify the <b>-d</b>
+("defaultcursor") option on the command line when you 
+invoke the program.
+</p>
+<p>
+If the automated processing worked correctly, you can 
+accept the result and move on by typing <b>q</b> to the 
+cursor. Ideally, this will be the case for most of your
+images.  If the automatic routines fail frequently,  
+it's likely you can
+improve the success rate by adjusting config parameters.  
+In the case shown, I'd accept the result; in
+particular, it looks like there's pretty good rejection
+of the neighboring star, and the faint star in the 
+background region isn't affecting the background fit
+much at all.
+</p><p>
+However, this happy situation will not always be reaized,
+so the program provides a set of cursor commands to 
+let you make adjustments by hand.  The commands to 
+change limits are:
+<ul>
+<li><b>c</b> - Center the aperture profile on the cursor, 
+overriding the first-moment center.
+<li><b>l</b> - Set the left limit of the profile on the cursor,
+overriding the automatic computation.
+<li><b>r</b> - Set the right limit of the profile.
+<li><b>1</b> - Set the lower limit of the left backround region.
+<li><b>2</b> - Set the upper limit of the left background region.
+<li><b>3</b> - Set the lower limit of the right background region.
+<li><b>4</b> - Set the upper limit of the right background region.
+</ul>
+<p>
+If the default scaling of the plot proves awkward,
+you can also change the plot limits:
+<ul>
+<li><b>w</b> - Pan out to wide limits, showing the whole slit profile.
+<li><b>r</b> - Restore the default limits.
+<li><b>j</b> - Set the left plot limit.
+<li><b>k</b> - Set the right plot limit.
+<li><b>b</b> - Set the bottom plot limit.
+<li><b>t</b> - Set the top plot limit.
+</ul>
+<p>
+After each command, the plot is immediately updated to reflect the
+change (internally, outdated 'lines' are erased and redrawn). 
+</p>
+<p>
+<b>Remarks on profile finding.</b>  A couple 
+of pointers: 
+<ul>
+<li>Things will go more
+quickly if your targets are placed at a consistent location
+on the slit; then you can use fairly narrow WIDTH and 
+PROFWIN parameters so that you almost always find and fit
+the right star automatically.  If your centering is 
+inconsistent, you can still use the program -- just set the 
+automatic limits wider, and use the cursor commands to correct
+cases in which the wrong object is selected.  This actually
+mimics the behavior of the old IRAF <i>apedit</i> command.
+<li> There's something of a tradeoff between setting the 
+aperture limits to include 'all the light' and including
+extra background that increases the noise.  This is less of
+an issue if you intend to extract the data using a
+variance-weighting technique such as that detailed by 
+Keith Horne 
+<a href="https://ui.adsabs.harvard.edu/link_gateway/1986PASP...98..609H/ADS_PDF">(1986, PASP, v. 98, p. 609)</a>
+which unweights the poorly-exposed pixels nicely.
+<li> If your spectrograph's focus changes along the
+dispersion (so that, for example, one end of the spectrum
+is fat and blurry), you'll likely want to set your limits 
+wide enough for the bad part.  The program assumes 
+that the same aperture limits (relative to the center) 
+can be used for the whole spectrum.
+</ul>
+<p>
+<p> 
+After all that rigamarole, all you have actually done is to 
+set set the center and limits of the aperture, and the 
+region to be used to determine the background.  These
+will be used in the next step, tracing the aperture
+along the dispersion.
+</p>
+<center>
+<font size="+1">
+<b>Tracing the aperture.</b>
+</font>
+</center>
+<p>
+<b>Why?</b> The streak a star's spectrum paints on 
+the dector is very unlikely to be <i>exactly</i>
+straight, or <i>exactly</i> parallel to the detector
+rows or columns.  Even if the spectrograph optics were perfect,
+and the detector squared up accurately, differential
+refraction will often displace the object's image as
+a function of wavelength.
+</p><p>
+To allow for this, after the aperture has been 
+defined at one wavelength, the program 
+`walks' up and down the dispersion axis, in steps of size NAVG
+pixels.  At each step, it repeats the whole automated 
+profile-finding process, with a few important differences:
+<ul>
+<li> Mercifully, it does not show you any of the profile
+graphs.
+<li> It looks for the star (cutting out subarrays,
+looking for maxima) at the position found in the last
+step.
+<li> If you've reset the star's center, it looks at
+how much this center was offset from the first-moment center
+found automatically, and applies the offset appropriately.
+<li> If you've reset any limits by hand, it uses those,
+relative to the aperture center.
+</ul>
+<p>
+Once the aperture centers have been found, they're
+plotted out as a function of dispersion line, along
+with a polynomial fit of order TRACEORD; the fit is
+iterated TRACEITER times, and at each iteration any
+points more than TRACECLIP sigma away from the fit
+are rejected.  Again, graph and a cursor appear, like
+this:
+</p>
+<center>
+<img style="width: 1000px; height: 600px;" alt="image" src="trace.png">
+</center>
+<p>
+Once again the points <i>included</i> in the fit are overplotted
+in red, while the rejected points are blue.
+</p><p>
+If the fit satisfactory, typing
+<b>q</b> will accept the fit and move on, whereupon  
+<ul>
+<li> If you're
+only doing one spectrum, the program will silently 
+write the results and stop.
+<li> If you're processing a list of images specified
+by '@', it will process the next image if there is one.
+</ul>
+<p>
+There's no provision (yet) for rejecting a fit and
+not writing it, nor for gracefully interrupting the list 
+processing.
+</p>
+<p>
+If the fit is <i>not</i> satisfactory, 
+you can adjust it using cursor commands.  The
+paradigm is reminiscent of IRAF's <i>icfit</i>, but differs
+in detail: the commands are not identical, and the 
+fit is immediately re-computed and re-displayed after 
+each change.  To edit points, you have
+<ul>
+<li><b>)</b> - Ignore (i.e. exclude from the fit) 
+all the points to the <i>right</i>
+of the cursor.  This is useful if the spectrum fades
+and is lost on that end.
+<li><b>(</b> - Ignore all points to the <i>left</i> of the
+cursor.
+<li><b>d</b> - Ignore the single point nearest the cursor.
+<li><b>r</b> - Restore, i.e., include back in the fit, the 
+point nearest the cursor.
+<li><b>R</b> - Restore <b>all</b> points to the fit.
+</ul>
+<p>
+Note that when you edit points, the program 
+does <i>not</i> iterate and reject more points
+when it re-fits the curve.  
+</p>
+<p>
+You can also change the fit order (but not, at this
+point, the kind of function -- it's always a 
+single polynomial) using
+</p>
+<ul>
+<li><b>o</b> - <i>Decrease</i> the fit order by one.  Use this
+if the curve looks 'overfit'.
+<li><b>O</b> - <i>Increase</i> the fit order by one.
+</ul>
+<p>
+After you change the order, the automatic re-fit <i>does</i> 
+iterate and reject further points.  This can lead to 'rejection
+creep', where you've excluded too many points.  If that
+happens, <b>R</b> will restore all the points, and another
+command 
+<ul>
+<li><b>i</b> - Iterate the fit (rejecting points) using the current
+fit order
+</ul> 
+<p>
+will run the iterations and reject outlying points.
+</p><p>
+Commands for re-scaling the graph are seldom
+needed and not implemented here.  If 
+you should need to magnify a portion, you can use
+the magnifying glass that matplotlib provides.
+</p><p>
+Note that you don't need to be overly fussy about the trace
+in most cases, though if the signal-to-noise goes bad you'll
+see some pathologies.  Sometimes, when the profile is totally
+lost, the profile 'walks' off in a straightish line; you'll
+want to ignore those points with <b>)</b> or <b>(</b>.  It
+may also be helpful to 'stiffen' the fit by decreasing the 
+polynomial order (with <b>o</b>), so that it 
+doesn't wander off too much in the unconstrained region.
+</p>
+<center>
+<font size="+1">
+<b>The end product.</b>
+</font>
+</center>
+<p>
+This is almost anticlimactic!  The output for each spectrum
+is <b>a tiny text file</b>  in a subdirectory called <i>database</i>,
+which sits under the directory you're working in.  If 
+the <i>database</i> directory does not exist, it will be
+created automagically.  If your image is named, for example,
+<i>ccd.123.fits</i>, the file will be called <i>apccd.123</i>,
+the '.fits' is stripped off and 'ap' is prepended.  
+If you're curious, you can look at the 'ap' file with a text
+editor, and you'll see it's a bunch of lines with keywords
+and numbers.  
+</p><p>
+The file format, and the whole 'database/ap' scheme, mimics
+IRAF pretty much exactly.  This means you can use IRAF
+tasks for subsequent processing that needs this information.
+It may not be what one would design from scratch, but this is
+a significant advantage, especially in the present epoch when
+IRAF and its successors co-exist in a rather unsettled 
+environment.
+</p><p>
+If your data have dispersion along columns (so you're using
+the <b>-c</b> option), the output file format is adjusted 
+appropriately and is still compatible with IRAF.
+</p><p>
+<center>
+<font size="+1">
+<b>What next?</b>
+</font>
+</center>
+<p>
+Now that you've set up the aperture parameters, you can extract 
+your spectrum using IRAF's task
+<i>apextract</i>, or -- <i>if your objects are all point
+sources!</i> -- you could try out <i>opextract.py</i>, which 
+is my implementation
+of Keith Horne's 
+<a href="https://ui.adsabs.harvard.edu/link_gateway/1986PASP...98..609H/ADS_PDF">(1986, PASP, v. 98, p. 609)</a> variance-weighted optimal
+spectral extraction algorithm.
+Available on a github near you, <i>opextract.py</i> is set up 
+to read aperture files written in the standard IRAF 
+format (database/ap), that is, the aperture files we just made.
+As currently implemented, 
+<i>opextract.py</i> extracts one spectrum at a time, so 
+for production I use it in a script.
+</p><p>
+<b>Musings.</b> 
+In another sense, "What next?" might be taken as meaning
+"What IRAF processing step should be the next to ported 
+to python?" The <i>identify/reidentify</i> step is an obvious candidate,
+and the cursor-driven techniques developed here should be
+nicely suitable.  <i>dispcor</i> requires rebinning
+of the pixel data, and so might best be
+done using <i>specutils</i>.  I've heard at least one person
+bemoan the absence of an easy visualize/manipulate
+thing like <i>splot</i>, which again might be built
+around <i>specutils</i>. 
+</p><p>
+I know that there is at least one very sophisticated
+effort out there to create automated pipelines for
+a wide variety of spectrographs.  This is great, but
+I worry about trusting such pipelines blindly. Also,
+as a geezer &reg , I find the elaborate software 
+environment of these -- necessary to do all things
+for all people -- to be a bit off-putting.  Fortunately
+I have developed some programming skills since reading the 
+FORTRAN manual back in '65, or whenever (I'm exaggerating;
+I'm not quite that old!); hopefully this contribution
+will strike a pleasing balance between simplicity and
+sophistication.
+</p><p>
+Thanks for reading.  If you have comments or suggestions,
+I am extremely easy to find.
+</p>
+
+<center>
+<font size="+2"> Technical Appendix (Tricks learned.)
+</font>
+</center>
+<p>
+The code itself is pretty heavily commented, so programmers
+should hopefully be able to follow it.
+</p>
+<p>
+However, I thought it might be worth explaining and 
+memorializing how a few things work, in case anyone finds it useful,
+if only for avoiding endless visits to StackOverflow.
+As is standard practice, I'll assume that you have
+named the modules as follows:
+<pre>
+import matplotlib.pyplot as plt
+import numpy as np
+</pre>
+</p>
+<center>
+<font size="+1"> The Cursor-driven graphics scheme
+</font>
+</center>
+<p>
+This can be pretty tricky to get right, but it seems 
+to work here.
+</p><p>
+The usual way to graph something in matplotlib is to 
+call the various functions that specify the plot's
+contents, and generate the plot itself with
+<pre>
+plt.show()
+</pre>
+<p>
+With a passive graph, that's all there is to it -- 
+execution stops, and you admire your
+work, save the result, whatever.  (You can also specify
+backends for pdf or postscript output, but that's another
+story).  
+</p><p>
+However, for the present case, you want 
+to <i>interact</i> with the
+data, and furthermore, <i>make the changes show up</i>
+on a persistent graph.  We'd like to emulate,
+more or less,
+the behavior of IRAF tasks such as <i>icfit</i>, which 
+interactively fits a curve to some data.  The cursor-driven
+interaction model dates way back to 1970s-vintage
+Tektronix terminals, but it's very convenient.
+</p><p>
+The first step to doing this is to explicitly make your
+plot a <i>figure</i> and connect the <i>canvas</i> 
+object of this figure to an <i>event handler</i>
+routine, as follows:
+<pre>
+fig = plt.figure()
+fig.canvas.mpl_connect('key_press_event',onpress) 
+</pre>
+<p>
+where <i>onpress</i> is a function that you get to 
+specify.  You can use any name in the role <i>onpress</i>
+plays here; it will be the routine which will be
+called any time you press a key in the graph. 
+<i>onpress</i> is the name used in the matplotlib
+documentation, so I've tended to adopt it.
+</p><p>
+Now, when you make the plot, the program enters an
+<i>event loop</i>, waiting for input and taking the
+specified action when it occurs.  The same general
+scheme is used for just about any GUI programming; a
+bunch of buttons entryboxes and what have you get
+painted on the screen and linked to various actions,
+and the program just sits there in an event loop
+waiting for the user to take an action. 
+</p><p>
+In this case, the action that's taken is 
+specified by the contents of the <i>onpress</i>
+function.  <i>onpress</i> might look something like this:
+<pre>
+def onpress(event) :
+    
+    if event.key == 'p' :
+        print(f"You pressed {event.key} at {event.xdata} {event.ydata}")
+
+</pre>
+<p>
+The <i>event</i> object contains the information about your
+keystroke; among its attributes are <i>key, xdata</i> and <i>ydata</i>,
+the location of the cursor in the graph's data space (not raw
+screen pixels) when the key was pressed.
+In this example, if you plotted a graph and typed 'p', 
+you might see printed
+<pre>
+You pressed p at 0.38289 0.93285
+</pre>
+<p>
+If you typed anything else, nothing would happen (unless the key
+you chose was a matplotlib key binding.)
+</p><p>
+This is fine, but we're not quite there yet; we still need to
+<ol>
+<li> Pass any information from inside <i>onpress</i> out to 
+the larger program, 
+<li> Make any changes to the plot, and
+<li> Display the updated plot.
+</ol>
+<p>
+I'll discuss these in turn.
+</p>
+<p> <b>Getting revised information out.</b>  It's not 
+immediately obvious how to do this, 
+because <i>onpress</i> is never called explicitly and
+does't seem to return a value anywhere; handing back a value
+with a <i>return</i> statement won't work.  The only 
+way I've been able to pass information out is to declare 
+as a <b>global variable</b> anything that needs
+to be changed and handed back.
+If you name a variable consistently at all function levels,
+and declare it <i>global</i>, then updating it within a 
+function will also update it in the main program.  For example:
+<pre>
+#!/usr/bin/env python3
+  
+def globvartest(x) :
+
+   global y
+   y = x ** 2
+
+y = 3
+x = 7
+
+globvartest(x)
+
+print(y)
+</pre>
+<p>
+will print '49'; if you remove the 'global y' statment, you get
+'3'.
+</p><p>
+This scheme works, but to avoid blunders you should keep
+your global variables to a minimum -- only the ones that are
+necessary.  It's easy to get into name collisions if you're 
+not careful.
+</p>
+<p>
+<b>Making changes to the plot.</b> For simple changes, there's 
+not much to it.  For example,
+<pre>
+if onpress == 't' :
+    axes = plt.gca()                # get current axes
+    ylims = axes.get_ylim()         # get current y limits (a 2-tuple)
+    axes.set_ylim(ylims[0], event.ydata)  # keep lower limit, but reset upper.
+</pre>
+</p>
+<p>
+However, if you want to <b>erase</b> a previously-plotted point, or
+something, you need to do more.  As a prerequisite, when you first
+plot your point, you need to save a reference to the 'line' object
+used to plot it; the return values of plotting functions include
+the objects they plotted.  For example:
+<pre>
+myline = plt.plot(xarr,yarr)
+</pre>
+<p>
+In some cases <i>myline</i> will be a tuple; if so, the actual artist,
+or whatever, is the zeroth element.  Also,
+you need to initialize <i>myline</i> to <i>None</i> early on in the program.
+Then, when you want to plot a new version, in whatever routine does
+the plotting:
+<pre>
+
+global myline
+
+if myline is not None :          # use 'is' and not '=='
+    myl =  myline.pop(0)         # the 'artist' is 0th element of a tuple
+    myl.remove()                 
+
+myline = plt.plot(newxarr, newyarr)    
+</pre>
+<p> 
+The tuple thing is needed when 
+you're erasing a value returned by <i>plt.plot(xarr,yarr)</i>,
+which returns a tuple.  The code also has
+return values from <i>plt.axvline</i> which plots a vertical
+line.  It apparently returns the artist, not in a tuple, and the
+artist alone does have a <i>.remove()</i> method. 
+</p><p>
+<li> Replotting. </i>  This is simple; <b>No changes occur until
+you explicitly call plt.draw().</b>  When you do so, it seems to 
+have no effect on the event loop; the cursor comes back, ready for
+more input. 
+</p><p>
+Here's an example from the code, shortened:
+<pre>
+def onpress(event) :  
+
+    global bckgpts
+    global bckgfitline
+    global centerline, lowapline, highapline
+
+    global xlow, xhigh, ylow, yhigh   # actual plot limits.
+
+    global b1, b2, b3, b4
+    global apcenter, aplow, aphigh
+  
+    ...........
+
+    if event.key == '1' :
+        b1 = int(event.xdata)
+        (bckgfit, bckgatctr) = fitsky(xrows, profile, b1, b2, b3, b4, nord,
+            niterate, clip, verbose = False)
+        plt.draw()
+ 
+    ...........
+    
+    if event.key == 'l' :
+        aplow = event.xdata
+        lowapline.remove()
+        lowapline = plt.axvline(aplow, color='green', linestyle = 'dashed')
+        plt.draw()
+
+</pre>
+<p>
+Notice again that <i>plt.axvline</i>, which draws a vertical 
+line, returns only a simple
+artist which can be removed.  By contrast, inside <i>fitsky</i>, we have
+<pre> 
+        if bckgfitline is not None :
+            bfitl = bckgfitline.pop(0) # it's a tuple
+            bfitl.remove()
+        # and plot the new one.
+        bckgfitline = plt.plot(xrows, bckgfit)
+</pre> 
+<p> 
+because <i>plt.plot</i> returned a tuple.
+</p><p>
+
+<b>Disabling 'hot keys'.</b>  When matplotlib renders an interactive 
+window, it turns on several 'hot keys' -- called 'key bindings' -- for
+easy maniplation.  For example, 'l' sets the y-axis to a log scale. 
+But what if we want to use the 'l' key for something else?  We actually
+do, to be consistent with IRAF, which uses 'l' and 'u' for lower
+and upper aperture limits.  To get the desired behavior, we can
+selectively disable key bindings.  From the code:
+
+<pre>
+import matplotlib as mpl
+
+    try :
+        mpl.rcParams['keymap.all_axes'].remove('a')
+        mpl.rcParams['keymap.xscale'].remove('k')
+        mpl.rcParams['keymap.yscale'].remove('l')
+        mpl.rcParams['keymap.zoom'].remove('o')
+        print("Disabled selected keymaps.")
+    except :
+        pass
+
+</pre>
+<p>
+These removals are wrapped in a <i>try ... except</i> because
+trying to remove a non-existent binding causes a fatal error.
+</p><p>
+How do we know what the keymap is called?  Here's
+a little program prints all the keymaps, so you'll know what to 
+disable:
+<pre>
+#!/usr/bin/env python3
+"""little script to print out the default 
+   matplot key bindings so they can be 
+   disabled.
+"""
+
+import matplotlib as mpl
+
+for k,v in mpl.rcParams.items() :
+    if 'keymap' in k :
+        print(f"{k} {v}")
+</pre>
+
+</p><p> 
+Of course, some key bindings are actually useful, so it's nice
+to be able to remove them individually.
+
+</font></body></html>
